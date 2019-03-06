@@ -43,9 +43,9 @@ train_init_op = iter.make_initializer(train_batches)
 eval_init_op = iter.make_initializer(eval_batches)
 
 logging.info("# Load model")
-m = Transformer(hp)
-loss, train_op, global_step, train_summaries = m.train(xs, ys)
-y_hat, eval_summaries = m.eval(xs, ys)
+transformer = Transformer(hp)
+loss, train_op, global_step, train_summaries = transformer.train(xs, ys)
+y_hat, eval_summaries = transformer.eval(xs, ys)
 # y_hat = m.infer(xs, ys)
 
 logging.info("# Session")
@@ -78,7 +78,7 @@ with tf.Session() as sess:
             summary_writer.add_summary(_eval_summaries, _gs)
 
             logging.info("# get hypotheses")
-            hypotheses = get_hypotheses(num_eval_batches, num_eval_samples, sess, y_hat, m.idx2token)
+            hypotheses = get_hypotheses(num_eval_batches, num_eval_samples, sess, y_hat, transformer.idx2token)
 
             logging.info("# write results")
             model_output = "iwslt2016_E%02dL%.2f" % (epoch, _loss)

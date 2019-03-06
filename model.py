@@ -44,8 +44,10 @@ class Transformer:
             x, seqlens, sents1 = xs
 
             # embedding
+            # x:[N,T1], embeddings:[vocab, d_model]
+            # enc:[N, T1, d_model]
             enc = tf.nn.embedding_lookup(self.embeddings, x) # (N, T1, d_model)
-            enc *= self.hp.d_model**0.5 # scale
+            enc *= self.hp.d_model**0.5 # scale , sqrt(512)
 
             enc += positional_encoding(enc, self.hp.maxlen1)
             enc = tf.layers.dropout(enc, self.hp.dropout_rate, training=training)

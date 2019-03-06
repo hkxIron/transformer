@@ -273,18 +273,26 @@ def positional_encoding(inputs,
 
     returns
     3d tensor that has the same shape as inputs.
+
+    说明:
+    偶数位置:
+        PE(pos,2i)  =sin(pos/power(10000,2i/d_model))
+    奇数位置:
+        PE(pos,2i+1)=cos(pos/power(10000,2i/d_model))
     '''
 
-    E = inputs.get_shape().as_list()[-1] # static
+    E = inputs.get_shape().as_list()[-1] # static, tuple
     N, T = tf.shape(inputs)[0], tf.shape(inputs)[1] # dynamic
     with tf.variable_scope(scope, reuse=tf.AUTO_REUSE):
         # position indices
-        position_ind = tf.tile(tf.expand_dims(tf.range(T), 0), [N, 1]) # (N, T)
+        position_ind = tf.tile(tf.expand_dims(tf.range(T), 0), multiples=[N, 1]) # (N, T)
 
-        # First part of the PE function: sin and cos argument
+        # First part of the Poistion Embedding function: sin and cos argument
+        # 偶数就不减,奇数减1
+        # [maxlen, E]
         position_enc = np.array([
-            [pos / np.power(10000, (i-i%2)/E) for i in range(E)]
-            for pos in range(maxlen)])
+            [pos / np.power(10000, (i-i%2)/E) for i in range(E)] for pos in range(maxlen)
+        ])
 
         # Second part, apply the cosine to even columns and sin to odds.
         position_enc[:, 0::2] = np.sin(position_enc[:, 0::2])  # dim 2i
@@ -292,11 +300,14 @@ def positional_encoding(inputs,
         position_enc = tf.convert_to_tensor(position_enc, tf.float32) # (maxlen, E)
 
         # lookup
+        # position_enc:[maxlen, E]
+        # position_ind:[N, T]
+        # outputs:[N, T, E]
         outputs = tf.nn.embedding_lookup(position_enc, position_ind)
 
         # masks
         if masking:
-            outputs = tf.where(tf.equal(inputs, 0), inputs, outputs)
+            outputs = tf.where(tf.equal(inputs, 0), x=inputs, y=outputs)
 
         return tf.to_float(outputs)
 
