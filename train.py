@@ -44,6 +44,17 @@ eval_init_op = iter.make_initializer(eval_batches)
 
 logging.info("# Load model")
 transformer = Transformer(hp)
+"""
+xs: tuple of
+    x: int32 tensor. (N, T1)
+    x_seqlens: int32 tensor. (N,)
+    sents1: str tensor. (N,)
+ys: tuple of
+    decoder_input: int32 tensor. (N, T2)
+    y: int32 tensor. (N, T2)
+    y_seqlen: int32 tensor. (N, )
+    sents2: str tensor. (N,)
+"""
 loss, train_op, global_step, train_summaries = transformer.train(xs, ys)
 y_hat, eval_summaries = transformer.eval(xs, ys)
 # y_hat = m.infer(xs, ys)

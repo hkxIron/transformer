@@ -34,8 +34,15 @@ def layer_normalization(inputs, epsilon = 1e-8, scope="layer_normalization"):
         # gamma:[d_model,]
         gamma = tf.get_variable("gamma", params_shape, initializer=tf.ones_initializer())
         # inputs: [N, T_q, d_model].
+        # mean: [N, T_q, 1]
         # normalized: [N, T_q, d_model].
         normalized = (inputs - mean) / ( (variance + epsilon) ** (.5) ) # (x-mu)/sigma
+        """
+        注意:此处的gamma在各个维度上的值并不相同,即各维度上不共享
+        """
+        # gamma:[d_model,]
+        # normalized: [N, T_q, d_model].
+        # beta:[d_model,]
         outputs = gamma * normalized + beta
         
     return outputs
@@ -107,6 +114,20 @@ def scaled_dot_product_attention(Q, K, V,
         query_key_interaction = mask(query_key_interaction, Q, K, type="key")
 
         # causality or future blinding masking
+        """
+        生成query_key_interaction关于时间的掩码下三角矩阵
+        query_key_interaction:[N, T_q, T_k]
+        例:  
+        [[-1.4095545   0.          0.        ]
+         [ 0.526246   -0.11131065  0.        ]
+         [ 0.80647576 -0.886015   -0.04653838]
+         [ 1.073006   -0.6044851  -0.7388869 ]]
+         
+        即时间T_q=2时,只能与时间为T_k=1或T_k=2的交互
+          时间T_q=3时,只能与时间为T_k=1或T_k=2, T_k=3的交互
+        
+        由于在代码中,padding的是一个非常大的负数,因此经过softmax之后,会变成0
+        """
         if causality: # 因果关系
             query_key_interaction = mask(query_key_interaction, type="future")
 
@@ -189,12 +210,25 @@ def mask(inputs, queries=None, keys=None, type=None):
         # Apply masks to inputs
         outputs = inputs*masks
     elif type in ("f", "future", "right"):
+        """
+        生成inputs的关于时间的掩码下三角矩阵
+        
+        此处是因果推断,即预测T时刻时不能提前看到T时刻的标签
+        input: [[-1.4095545  -0.5366828  -0.5652379 ]
+                [ 0.526246   -0.11131065  0.26350743]]
+        tril: [[-1.4095545   0.          0.        ]
+               [ 0.526246   -0.11131065  0.        ]] 
+        """
         # inputs: [N, T_q, T_k]
         diag_vals = tf.ones_like(inputs[0, :, :])  # (T_q, T_k)
-        tril = tf.linalg.LinearOperatorLowerTriangular(diag_vals).to_dense()  # (T_q, T_k)
+        # 生成diag_vals的下三角矩阵
+        # tril:[T_q, T_k]
+        tril = tf.linalg.LinearOperatorLowerTriangular(tril=diag_vals).to_dense()  # (T_q, T_k)
+        # masks:[N, T_q, T_k]
         masks = tf.tile(tf.expand_dims(tril, 0), [tf.shape(inputs)[0], 1, 1])  # (N, T_q, T_k)
 
         paddings = tf.ones_like(masks) * padding_num
+        # outputs: [N, T_q, T_k]
         outputs = tf.where(tf.equal(masks, 0), paddings, inputs)
     else:
         print("Check if you entered type correctly!")
@@ -222,6 +256,7 @@ def multihead_attention(queries, keys, values,
       A 3d tensor with shape of (N, T_q, C)
 
     =====================
+    注意:T_q与T_k的值不一定会相同,所以会有padding
     procedures:
     1. self-attention
     2. add residual
@@ -285,7 +320,7 @@ def multihead_attention(queries, keys, values,
  
     return attentioned_value
 
-def ff(inputs, num_units, scope="positionwise_feedforward"):
+def positionwise_feedforward(inputs, num_units, scope="positionwise_feedforward"):
     '''position-wise feed forward net. See 3.3
     
     inputs: A 3d tensor with shape of [N, T, C].
@@ -294,9 +329,15 @@ def ff(inputs, num_units, scope="positionwise_feedforward"):
 
     Returns:
       A 3d tensor with the same shape and dtype as inputs
+
+    procedure:
+    1. feed-forward
+    2. residual
+    3. layer normalization
     '''
     with tf.variable_scope(scope, reuse=tf.AUTO_REUSE):
         # Inner layer
+        # inputs: [N, T, C].
         outputs = tf.layers.dense(inputs, num_units[0], activation=tf.nn.relu)
 
         # Outer layer
@@ -311,6 +352,12 @@ def ff(inputs, num_units, scope="positionwise_feedforward"):
     return outputs
 
 def label_smoothing(inputs, epsilon=0.1):
+    """
+    有点像laplace平滑,将给为0的标签一个比较小的概率
+    :param inputs:
+    :param epsilon:
+    :return:
+    """
     '''Applies label smoothing. See 5.4 and https://arxiv.org/abs/1512.00567.
     inputs: 3d tensor. [N, T, V], where V is the number of vocabulary.
     epsilon: Smoothing rate.
@@ -406,4 +453,7 @@ def noam_scheme(init_lr, global_step, warmup_steps=4000.):
         until it reaches init_lr.
     '''
     step = tf.cast(global_step + 1, dtype=tf.float32)
+    """
+    init_lr * warmup^0.5 * min(step*warmup^(-1.5), step^(-0.5))
+    """
     return init_lr * warmup_steps ** 0.5 * tf.minimum(step * warmup_steps ** -1.5, step ** -0.5)

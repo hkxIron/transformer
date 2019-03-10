@@ -34,14 +34,14 @@ def prepro(hp):
 
     logging.info("# Preprocessing")
     # train
-    _prepro = lambda x:  [line.strip() for line in open(x, 'r').read().split("\n") \
+    _prepro = lambda x:  [line.strip() for line in open(x, 'r', encoding="utf-8").read().split("\n") \
                       if not line.startswith("<")]
     prepro_train1, prepro_train2 = _prepro(train1), _prepro(train2)
     assert len(prepro_train1)==len(prepro_train2), "Check if train source and target files match."
 
     # eval
     _prepro = lambda x: [re.sub("<[^>]+>", "", line).strip() \
-                     for line in open(x, 'r').read().split("\n") \
+                     for line in open(x, 'r', encoding="utf-8").read().split("\n") \
                      if line.startswith("<seg id")]
     prepro_eval1, prepro_eval2 = _prepro(eval1), _prepro(eval2)
     assert len(prepro_eval1) == len(prepro_eval2), "Check if eval source and target files match."
@@ -61,7 +61,7 @@ def prepro(hp):
     logging.info("# write preprocessed files to disk")
     os.makedirs("iwslt2016/prepro", exist_ok=True)
     def _write(sents, fname):
-        with open(fname, 'w') as fout:
+        with open(fname, 'w', encoding="utf-8") as fout:
             fout.write("\n".join(sents))
 
     _write(prepro_train1, "iwslt2016/prepro/train.de")
@@ -86,7 +86,7 @@ def prepro(hp):
 
     logging.info("# Segment")
     def _segment_and_write(sents, fname):
-        with open(fname, "w") as fout:
+        with open(fname, "w", encoding="utf-8") as fout:
             for sent in sents:
                 pieces = sp.EncodeAsPieces(sent)
                 fout.write(" ".join(pieces) + "\n")
