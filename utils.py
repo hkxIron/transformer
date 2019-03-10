@@ -82,7 +82,7 @@ def save_hparams(hparams, path):
     hparams as literal dictionary to path.
     '''
     if not os.path.exists(path): os.makedirs(path)
-    hp = json.dumps(vars(hparams))
+    hp = json.dumps(vars(hparams), indent=2)
     with open(os.path.join(path, "hparams"), 'w') as fout:
         fout.write(hp)
 

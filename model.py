@@ -215,6 +215,9 @@ class Transformer:
         # memory:[N, T2, d_model]
         # sents2:[N]
 
+        """
+        注意:不管decoder里有多少层block,用的memory都是相同的,即encoder产生的
+        """
         # logits:[N, T2, vocab_size]
         # preds:[N, T2, vocab_size]
         logits, preds, y, sents2 = self.decode(ys, memory)
@@ -228,7 +231,10 @@ class Transformer:
         """
         感觉这里y_与logits有相同的shape
         """
+        # logits:[N, T2, vocab_size]
+        # y_:[N, T2, vocab_size]
         # cross_entropy:[N, T2]
+        logging.info("logits:{} labels:{}".format(logits, y_)) # logits:(?, ?, 32000), labels:(?,?,32000)
         cross_entropy = tf.nn.softmax_cross_entropy_with_logits_v2(logits=logits, labels=y_) # 多分类多标签?
         #cross_entropy = tf.nn.softmax_cross_entropy_with_logits(logits=logits, labels=y_) #多分类单标签
         # y:[N, T2]
@@ -258,24 +264,34 @@ class Transformer:
         '''
         decoder_inputs, y, y_seqlen, sents2 = ys
 
+        # xs[0]: [N, T1]
+        # decoder_inputs: [N,1]
         decoder_inputs = tf.ones((tf.shape(xs[0])[0], 1), tf.int32) * self.token2idx["<s>"]
         ys = (decoder_inputs, y, y_seqlen, sents2)
 
-        memory, sents1 = self.encode(xs, False)
+        memory, sents1 = self.encode(xs, training=False)
 
         logging.info("Inference graph is being built. Please be patient.")
         for _ in tqdm(range(self.hp.maxlen2)):
-            logits, y_hat, y, sents2 = self.decode(ys, memory, False)
-            if tf.reduce_sum(y_hat, 1) == self.token2idx["<pad>"]: break
-
+            # logits:[N, T2, vocab_size]
+            # y_hat:[N, T_dynamic]
+            logits, y_hat, y, sents2 = self.decode(ys, memory, training=False) # y_hat的长度不断增加
+            cur_token = tf.reduce_sum(y_hat, axis=1) # cur_token:[N,]
+            if _ ==0:logging.info("y_hat:{} cur_token:{}".format(y_hat, cur_token))
+            """
+            如果当前预测的字符为padding,则终止预测
+            即当此batch中所有的样本都预测完毕时,才终止,否则将一直预测
+            """
+            if cur_token == self.token2idx["<pad>"]: break
+            # 生成新的decoder_inputs
             _decoder_inputs = tf.concat((decoder_inputs, y_hat), 1)
             ys = (_decoder_inputs, y, y_seqlen, sents2)
 
-        # monitor a random sample
+        # monitor a random sample, 随机选择一个句子作为监控
         n = tf.random_uniform((), 0, tf.shape(y_hat)[0]-1, tf.int32)
-        sent1 = sents1[n]
+        sent1 = sents1[n] # 原文
         pred = convert_idx_to_token_tensor(y_hat[n], self.idx2token)
-        sent2 = sents2[n]
+        sent2 = sents2[n] # 译文
 
         tf.summary.text("sent1", sent1)
         tf.summary.text("pred", pred)

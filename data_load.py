@@ -38,7 +38,8 @@ def load_data(fpath1, fpath2, maxlen1, maxlen2):
     sents2: list of target sents
     '''
     sents1, sents2 = [], []
-    with open(fpath1, 'r', encoding="utf-8") as f1, open(fpath2, 'r', encoding="utf-8") as f2:
+    with open(fpath1, 'r', encoding="utf-8") as f1, \
+            open(fpath2, 'r', encoding="utf-8") as f2:
         for sent1, sent2 in zip(f1, f2):
             if len(sent1.split()) + 1 > maxlen1: continue # 1: </s>
             if len(sent2.split()) + 1 > maxlen2: continue  # 1: </s>
@@ -108,8 +109,13 @@ def input_fn(sents1, sents2, vocab_fpath, batch_size, shuffle=False):
         y_seqlen: int32 tensor. (N, )
         sents2: str tensor. (N,)
     '''
-    shapes = (([None], (), ()),
-              ([None], [None], (), ()))
+    """
+    shapes:
+        xs: x:[N,T1] x_seqlens:[N] sents1:[N,]
+        ys: decoder_in:[N,T2] y:[N] y_seqlens:[N] sents2:[N,] 
+    """
+    shapes = (([None], (), ()), # xs:
+              ([None], [None], (), ())) # ys:
     types = ((tf.int32, tf.int32, tf.string),
              (tf.int32, tf.int32, tf.int32, tf.string))
     paddings = ((0, 0, ''),
@@ -124,7 +130,7 @@ def input_fn(sents1, sents2, vocab_fpath, batch_size, shuffle=False):
     if shuffle: # for training
         dataset = dataset.shuffle(128*batch_size)
 
-    dataset = dataset.repeat()  # iterate forever
+    dataset = dataset.repeat()  # iterate forever, 一直循环
     dataset = dataset.padded_batch(batch_size, shapes, paddings).prefetch(1)
 
     return dataset

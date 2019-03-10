@@ -25,7 +25,10 @@ parser = hparams.parser
 hp = parser.parse_args()
 save_hparams(hp, hp.logdir)
 
+# google 原始transformer参数:1 6730 1123
 logging.info("# Prepare train/eval batches")
+# train1:iwslt2016/segmented/train.de.bpe
+# train2:iwslt2016/segmented/train.en.bpe
 train_batches, num_train_batches, num_train_samples = get_batch(hp.train1, hp.train2,
                                              hp.maxlen1, hp.maxlen2,
                                              hp.vocab, hp.batch_size,
@@ -68,6 +71,7 @@ with tf.Session() as sess:
         sess.run(tf.global_variables_initializer())
         save_variable_specs(os.path.join(hp.logdir, "specs"))
     else:
+        logging.info("Restore model from {}".format(ckpt))
         saver.restore(sess, ckpt)
 
     summary_writer = tf.summary.FileWriter(hp.logdir, sess.graph)
@@ -112,3 +116,4 @@ with tf.Session() as sess:
 
 
 logging.info("Done")
+

@@ -454,6 +454,7 @@ def noam_scheme(init_lr, global_step, warmup_steps=4000.):
     '''
     step = tf.cast(global_step + 1, dtype=tf.float32)
     """
+    通过代码模拟,可以看出其lr先急速增加至init_lr, 后缓慢减小
     init_lr * warmup^0.5 * min(step*warmup^(-1.5), step^(-0.5))
     """
     return init_lr * warmup_steps ** 0.5 * tf.minimum(step * warmup_steps ** -1.5, step ** -0.5)
