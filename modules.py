@@ -11,7 +11,7 @@ Building blocks for Transformer
 import numpy as np
 import tensorflow as tf
 
-def ln(inputs, epsilon = 1e-8, scope="ln"):
+def layer_normalization(inputs, epsilon = 1e-8, scope="layer_normalization"):
     '''Applies layer normalization. See https://arxiv.org/abs/1607.06450.
     inputs: A tensor with 2 or more dimensions, where the first dimension has `batch_size`.
     epsilon: A floating number. A very small number for preventing ZeroDivision Error.
@@ -21,13 +21,21 @@ def ln(inputs, epsilon = 1e-8, scope="ln"):
       A tensor with the same shape and data dtype as `inputs`.
     '''
     with tf.variable_scope(scope, reuse=tf.AUTO_REUSE):
-        inputs_shape = inputs.get_shape()
-        params_shape = inputs_shape[-1:]
-    
-        mean, variance = tf.nn.moments(inputs, [-1], keep_dims=True)
+        # inputs: [N, T_q, d_model].
+        inputs_shape = inputs.get_shape() # (N, T_q, d_model)
+        params_shape = inputs_shape[-1:] # 取出最后的维度,(d_model,)
+
+        # inputs: [N, T_q, d_model].
+        # mean: [N, T_q, 1],只在最后一个维度上进行求平均
+        # variance: [N, T_q, 1],只在最后一个维度上进行求方差
+        mean, variance = tf.nn.moments(inputs, axes=[-1], keep_dims=True)
+        # beta:[d_model,]
         beta= tf.get_variable("beta", params_shape, initializer=tf.zeros_initializer())
+        # gamma:[d_model,]
         gamma = tf.get_variable("gamma", params_shape, initializer=tf.ones_initializer())
-        normalized = (inputs - mean) / ( (variance + epsilon) ** (.5) )
+        # inputs: [N, T_q, d_model].
+        # normalized: [N, T_q, d_model].
+        normalized = (inputs - mean) / ( (variance + epsilon) ** (.5) ) # (x-mu)/sigma
         outputs = gamma * normalized + beta
         
     return outputs
@@ -54,7 +62,8 @@ def get_token_embeddings(vocab_size, num_units, zero_pad=True):
     return embeddings
 
 def scaled_dot_product_attention(Q, K, V,
-                                 causality=False, dropout_rate=0.,
+                                 causality=False,
+                                 dropout_rate=0.,
                                  training=True,
                                  scope="scaled_dot_product_attention"):
     '''See 3.2.1.
@@ -65,38 +74,67 @@ def scaled_dot_product_attention(Q, K, V,
     dropout_rate: A floating point number of [0, 1].
     training: boolean for controlling droput
     scope: Optional scope for `variable_scope`.
+
+    :return query_key_interaction:[N, T_q, d_v]
     '''
+    """
+    计算每个q对所有k_i的score
+    如q=[i,love,nlp]
+    
+    score_i = q*k(i)/sqrt(d_k)
+    score_i = softmax(score_i)
+    value = sum_{i}{score_i* value_i}
+    """
+
     with tf.variable_scope(scope, reuse=tf.AUTO_REUSE):
         d_k = Q.get_shape().as_list()[-1]
 
         # dot product
-        outputs = tf.matmul(Q, tf.transpose(K, [0, 2, 1]))  # (N, T_q, T_k)
+        # Q: [N, T_q, d_k]
+        # K: [N, T_k, d_k] => [N, d_k, T_k]
+        # query_key_interaction:[N, T_q, T_k]
+        query_key_interaction = tf.matmul(Q, tf.transpose(K, [0, 2, 1]))  # (N, T_q, T_k)
 
         # scale
-        outputs /= d_k ** 0.5
+        # query_key_interaction:[N, T_q, T_k]
+        query_key_interaction /= d_k ** 0.5
 
         # key masking
-        outputs = mask(outputs, Q, K, type="key")
+        # Q:[N, T_q, d_k]
+        # K:[N, T_k, d_k]
+        # query_key_interaction:[N, T_q, T_k]
+        # 对于key mask的话, 将key padding成outputs的维度
+        query_key_interaction = mask(query_key_interaction, Q, K, type="key")
 
         # causality or future blinding masking
-        if causality:
-            outputs = mask(outputs, type="future")
+        if causality: # 因果关系
+            query_key_interaction = mask(query_key_interaction, type="future")
 
         # softmax
-        outputs = tf.nn.softmax(outputs)
-        attention = tf.transpose(outputs, [0, 2, 1])
-        tf.summary.image("attention", tf.expand_dims(attention[:1], -1))
+        # query_key_interaction_norm:[N, T_q, T_k]
+        query_key_interaction_norm = tf.nn.softmax(query_key_interaction)
+        # attention:[N, T_k, T_q]
+        attention = tf.transpose(query_key_interaction_norm, [0, 2, 1])
+        tf.summary.image("attention", tf.expand_dims(attention[:1], -1)) # 取第一个元素,进行展示
 
         # query masking
-        outputs = mask(outputs, Q, K, type="query")
+        # Q:[N, T_q, d_k]
+        # K:[N, T_k, d_k]
+        # query_key_interaction_norm:[N, T_q, T_k]
+        # 对于query mask的话, 将query padding成outputs的维度
+        query_key_interaction_norm = mask(query_key_interaction_norm, Q, K, type="query")
 
         # dropout
-        outputs = tf.layers.dropout(outputs, rate=dropout_rate, training=training)
+        # query_key_interaction_norm:[N, T_q, T_k]
+        query_key_interaction_norm = tf.layers.dropout(query_key_interaction_norm, rate=dropout_rate, training=training)
 
         # weighted sum (context vectors)
-        outputs = tf.matmul(outputs, V)  # (N, T_q, d_v)
+        # query_key_interaction_norm:[N, T_q, T_k]
+        # V:[N, T_k, d_v].
+        # attentioned_value:[N, T_q, d_v]
+        attentioned_value = tf.matmul(query_key_interaction_norm, V)  # (N, T_q, d_v)
 
-    return outputs
+    return attentioned_value
 
 def mask(inputs, queries=None, keys=None, type=None):
     """Masks paddings on keys or queries to inputs
@@ -109,33 +147,40 @@ def mask(inputs, queries=None, keys=None, type=None):
                         [2.],
                         [0.]]], tf.float32) # (1, 3, 1)
     >> keys = tf.constant([[[4.],
-                     [0.]]], tf.float32)  # (1, 2, 1)
+                            [0.]]], tf.float32)  # (1, 2, 1)
     >> inputs = tf.constant([[[4., 0.],
-                               [8., 0.],
-                               [0., 0.]]], tf.float32)
-    >> mask(inputs, queries, keys, "key")
+                              [8., 0.],
+                              [0., 0.]]], tf.float32) #(1,3,2)
+    >> mask(inputs, queries, keys, "key") # (1, 3, 2)
     array([[[ 4.0000000e+00, -4.2949673e+09],
         [ 8.0000000e+00, -4.2949673e+09],
         [ 0.0000000e+00, -4.2949673e+09]]], dtype=float32)
+
     >> inputs = tf.constant([[[1., 0.],
                              [1., 0.],
-                              [1., 0.]]], tf.float32)
-    >> mask(inputs, queries, keys, "query")
+                             [1., 0.]]], tf.float32) # (1,3,2)
+    >> mask(inputs, queries, keys, "query") # (1,3,2)
     array([[[1., 0.],
         [1., 0.],
         [0., 0.]]], dtype=float32)
     """
-    padding_num = -2 ** 32 + 1
+    padding_num = -2 ** 32 + 1 # -4294967297
     if type in ("k", "key", "keys"):
+        # 对于key的话, padding成input的维度
         # Generate masks
+        # keys: [N, T_k, d]
         masks = tf.sign(tf.reduce_sum(tf.abs(keys), axis=-1))  # (N, T_k)
         masks = tf.expand_dims(masks, 1) # (N, 1, T_k)
+        # masks:[N, 1, T_k]
+        # queries: [N, T_q, d]
         masks = tf.tile(masks, [1, tf.shape(queries)[1], 1])  # (N, T_q, T_k)
 
         # Apply masks to inputs
-        paddings = tf.ones_like(inputs) * padding_num
+        # inputs: [N, T_q, T_k]
+        paddings = tf.ones_like(inputs) * padding_num # 注意, padding的不是0,而是一个比较小的数
         outputs = tf.where(tf.equal(masks, 0), paddings, inputs)  # (N, T_q, T_k)
     elif type in ("q", "query", "queries"):
+        # 对于query的话, padding成input的维度
         # Generate masks
         masks = tf.sign(tf.reduce_sum(tf.abs(queries), axis=-1))  # (N, T_q)
         masks = tf.expand_dims(masks, -1)  # (N, T_q, 1)
@@ -144,6 +189,7 @@ def mask(inputs, queries=None, keys=None, type=None):
         # Apply masks to inputs
         outputs = inputs*masks
     elif type in ("f", "future", "right"):
+        # inputs: [N, T_q, T_k]
         diag_vals = tf.ones_like(inputs[0, :, :])  # (T_q, T_k)
         tril = tf.linalg.LinearOperatorLowerTriangular(diag_vals).to_dense()  # (T_q, T_k)
         masks = tf.tile(tf.expand_dims(tril, 0), [tf.shape(inputs)[0], 1, 1])  # (N, T_q, T_k)
@@ -173,33 +219,71 @@ def multihead_attention(queries, keys, values,
     scope: Optional scope for `variable_scope`.
         
     Returns
-      A 3d tensor with shape of (N, T_q, C)  
+      A 3d tensor with shape of (N, T_q, C)
+
+    =====================
+    procedures:
+    1. self-attention
+    2. add residual
+    3. layer normaliztion
+    =====================
     '''
+    # queries: [N, T_q, d_model].
     d_model = queries.get_shape().as_list()[-1]
     with tf.variable_scope(scope, reuse=tf.AUTO_REUSE):
-        # Linear projections
-        Q = tf.layers.dense(queries, d_model, use_bias=False) # (N, T_q, d_model)
-        K = tf.layers.dense(keys, d_model, use_bias=False) # (N, T_k, d_model)
-        V = tf.layers.dense(values, d_model, use_bias=False) # (N, T_k, d_model)
+        """
+        Query vector, Key vector, Value vector三者向量维度为64(paper中的参数),小于原始embedding_size(512).
+        注意:感觉此处与原始paper中的略有不同,原始paper中,输入向量的维度(512)>映射后的向量维度(64),而此处是相等的
+        
+        q=X*Wq 
+        k=X*Wk
+        v=X*Wv
+        """
+        # Linear projections, 将query, key, value映射成指定维度的向量
+        # queries:[N, T_q, d_model], units=d_model
+        # Q:[N, T_q, d_model]
+        Q = tf.layers.dense(inputs=queries, units=d_model, use_bias=False) # (N, T_q, d_model), 里面是matrix_W_Q
+        K = tf.layers.dense(inputs=keys, units=d_model, use_bias=False) # (N, T_k, d_model), matrix_W_k
+        V = tf.layers.dense(inputs=values, units=d_model, use_bias=False) # (N, T_k, d_model), matrix_W_v
         
         # Split and concat
-        Q_ = tf.concat(tf.split(Q, num_heads, axis=2), axis=0) # (h*N, T_q, d_model/h)
-        K_ = tf.concat(tf.split(K, num_heads, axis=2), axis=0) # (h*N, T_k, d_model/h)
-        V_ = tf.concat(tf.split(V, num_heads, axis=2), axis=0) # (h*N, T_k, d_model/h)
+        # 将原始的Q在第2维分割成num_heads=h份,然后在第0维拼接
+        Q_ = tf.concat(tf.split(value=Q, num_or_size_splits=num_heads, axis=2), axis=0) # (h*N, T_q, d_model/h)
+        K_ = tf.concat(tf.split(value=K, num_or_size_splits=num_heads, axis=2), axis=0) # (h*N, T_k, d_model/h)
+        V_ = tf.concat(tf.split(value=V, num_or_size_splits=num_heads, axis=2), axis=0) # (h*N, T_k, d_model/h)
 
+        """
+        score_i = q*k(i)/sqrt(d_k)
+        score_i = softmax(score_i)
+        value = sum_{i}{score_i* value_i}
+        
+        此处的mulit-head attention设计的确巧妙!
+        """
         # Attention
-        outputs = scaled_dot_product_attention(Q_, K_, V_, causality, dropout_rate, training)
+        # Q_:(h*N, T_q, d_model/h)
+        # K_:(h*N, T_q, d_model/h)
+        # V_:(h*N, T_q, d_model/h)
+        # attentioned_value:[N=h*N, T_q, T_v=d_model/h]
+        attentioned_value = scaled_dot_product_attention(Q_, K_, V_, causality, dropout_rate, training)
 
+        """
+        注意:此处与原paper有所不同,原paper中,在concat向量之后,还会将concated_vector乘以Wo,但此处没有乘以Wo
+        """
+        # 直接将multi_head的输出concat拼接起来
         # Restore shape
-        outputs = tf.concat(tf.split(outputs, num_heads, axis=0), axis=2 ) # (N, T_q, d_model)
+        # attentioned_value:[h*N, T_q, d_model/h] -> (N, T_q, d_model)
+        attentioned_value = tf.concat(tf.split(attentioned_value, num_heads, axis=0), axis=2) # (N, T_q, d_model)
               
-        # Residual connection
-        outputs += queries
+        # Residual connection,残差连接
+        # queries: [N, T_q, d_model].
+        # attentioned_value: [N, T_q, d_model].
+        attentioned_value += queries
               
-        # Normalize
-        outputs = ln(outputs)
+        # layer normalize
+        # attentioned_value: [N, T_q, d_model].
+        attentioned_value = layer_normalization(attentioned_value)
  
-    return outputs
+    return attentioned_value
 
 def ff(inputs, num_units, scope="positionwise_feedforward"):
     '''position-wise feed forward net. See 3.3
@@ -222,7 +306,7 @@ def ff(inputs, num_units, scope="positionwise_feedforward"):
         outputs += inputs
         
         # Normalize
-        outputs = ln(outputs)
+        outputs = layer_normalization(outputs)
     
     return outputs
 
@@ -307,6 +391,9 @@ def positional_encoding(inputs,
 
         # masks
         if masking:
+            # inputs:[N,T,E]
+            # outputs:[N,T,E]
+            # inputs中mask=0的地方,还是填0
             outputs = tf.where(tf.equal(inputs, 0), x=inputs, y=outputs)
 
         return tf.to_float(outputs)

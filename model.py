@@ -47,19 +47,25 @@ class Transformer:
             # x:[N,T1], embeddings:[vocab, d_model]
             # enc:[N, T1, d_model]
             enc = tf.nn.embedding_lookup(self.embeddings, x) # (N, T1, d_model)
-            enc *= self.hp.d_model**0.5 # scale , sqrt(512)
+            enc *= self.hp.d_model**0.5 # scale , *sqrt(512)
 
-            enc += positional_encoding(enc, self.hp.maxlen1)
+            # enc:[N, T1, d_model]
+            # position_encoding:[N, T1, d_model]
+            position_encoding = positional_encoding(enc, self.hp.maxlen1)
+            # enc:[N, T1, d_model]
+            enc += position_encoding
             enc = tf.layers.dropout(enc, self.hp.dropout_rate, training=training)
 
             ## Blocks
+            # encoder是编码器的堆叠(论文中堆叠了6层):
             for i in range(self.hp.num_blocks):
                 with tf.variable_scope("num_blocks_{}".format(i), reuse=tf.AUTO_REUSE):
                     # self-attention
+                    # enc:[N, T1, d_model]
                     enc = multihead_attention(queries=enc,
                                               keys=enc,
                                               values=enc,
-                                              num_heads=self.hp.num_heads,
+                                              num_heads=self.hp.num_heads, # 多头attention
                                               dropout_rate=self.hp.dropout_rate,
                                               training=training,
                                               causality=False)
