@@ -39,6 +39,7 @@ class Transformer:
 
     """
     对于encoder而言,有1处attention:
+    0. x = position embedding + word embedding
     1. self-attention
     2. residual+layer normalization
     3. feed forward
@@ -65,6 +66,7 @@ class Transformer:
             # enc:[N, T1, d_model]
             # position_encoding:[N, T1, d_model]
             position_encoding = positional_encoding(enc, self.hp.maxlen1)
+
             """
             注意:position encoding直接加在原始encoding中
             """
@@ -72,12 +74,18 @@ class Transformer:
             enc += position_encoding
             enc = tf.layers.dropout(enc, self.hp.dropout_rate, training=training)
 
+            """
+            encoder中每个block由2部分组成:
+            1. self-attention
+            2. feed-forward
+            
+            """
             ## Blocks
             # encoder是编码器的堆叠(论文中堆叠了6层):
             for i in range(self.hp.num_blocks):
                 # 注意:variable_scope不同,各变量并不共享参数!!!
                 with tf.variable_scope("num_blocks_{}".format(i), reuse=tf.AUTO_REUSE):
-                    # self-attention
+                    # 1.self-attention
                     # enc:[N, T1, d_model]
                     enc = multihead_attention(queries=enc,
                                               keys=enc,
@@ -86,7 +94,7 @@ class Transformer:
                                               dropout_rate=self.hp.dropout_rate,
                                               training=training,
                                               causality=False)
-                    # feed forward
+                    # 2.feed forward
                     # enc:[N, T1, d_model]
                     enc = positionwise_feedforward(enc, num_units=[self.hp.d_ff, self.hp.d_model])
         # 最后一层的输出当成memory
@@ -95,6 +103,11 @@ class Transformer:
         return memory, sents1
 
     """
+    decoder中,每个block由3部分组成:
+    1. self-attention
+    2. encoder-decoder attention
+    3. feed forward
+    
     对于decoder而言,有2处attention:
     1. self-attention
     2. residual+layer normalization

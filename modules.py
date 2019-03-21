@@ -338,10 +338,10 @@ def positionwise_feedforward(inputs, num_units, scope="positionwise_feedforward"
     with tf.variable_scope(scope, reuse=tf.AUTO_REUSE):
         # Inner layer
         # inputs: [N, T, C].
-        outputs = tf.layers.dense(inputs, num_units[0], activation=tf.nn.relu)
+        outputs = tf.layers.dense(inputs, units=num_units[0], activation=tf.nn.relu)
 
         # Outer layer
-        outputs = tf.layers.dense(outputs, num_units[1])
+        outputs = tf.layers.dense(outputs, units=num_units[1])
 
         # Residual connection
         outputs += inputs
