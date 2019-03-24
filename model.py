@@ -10,8 +10,8 @@ Transformer network
 import tensorflow as tf
 
 from data_load import load_vocab
-from modules import get_token_embeddings, positionwise_feedforward, \
-    positional_encoding, multihead_attention, \
+from modules import get_token_embeddings, positionwise_feedforward_and_add_and_norm, \
+    positional_encoding, multihead_attention_and_add_and_norm, \
     label_smoothing, noam_scheme
 from utils import convert_idx_to_token_tensor
 from tqdm import tqdm
@@ -87,16 +87,16 @@ class Transformer:
                 with tf.variable_scope("num_blocks_{}".format(i), reuse=tf.AUTO_REUSE):
                     # 1.self-attention
                     # enc:[N, T1, d_model]
-                    enc = multihead_attention(queries=enc,
-                                              keys=enc,
-                                              values=enc,
-                                              num_heads=self.hp.num_heads, # 多头attention
-                                              dropout_rate=self.hp.dropout_rate,
-                                              training=training,
-                                              causality=False)
+                    enc = multihead_attention_and_add_and_norm(queries=enc,
+                                                               keys=enc,
+                                                               values=enc,
+                                                               num_heads=self.hp.num_heads,  # 多头attention
+                                                               dropout_rate=self.hp.dropout_rate,
+                                                               training=training,
+                                                               causality=False)
                     # 2.feed forward
                     # enc:[N, T1, d_model]
-                    enc = positionwise_feedforward(enc, num_units=[self.hp.d_ff, self.hp.d_model])
+                    enc = positionwise_feedforward_and_add_and_norm(enc, num_units=[self.hp.d_ff, self.hp.d_model])
         # 最后一层的输出当成memory
         # enc:[N, T1, d_model]
         memory = enc
@@ -150,29 +150,29 @@ class Transformer:
                 with tf.variable_scope("num_blocks_{}".format(i), reuse=tf.AUTO_REUSE):
                     # Masked self-attention (Note that causality is True at this time)
                     # dec:[N,T2,d_model]
-                    dec = multihead_attention(queries=dec,
-                                              keys=dec,
-                                              values=dec,
-                                              num_heads=self.hp.num_heads,
-                                              dropout_rate=self.hp.dropout_rate,
-                                              training=training,
-                                              causality=True,
-                                              scope="self_attention")
+                    dec = multihead_attention_and_add_and_norm(queries=dec,
+                                                               keys=dec,
+                                                               values=dec,
+                                                               num_heads=self.hp.num_heads,
+                                                               dropout_rate=self.hp.dropout_rate,
+                                                               training=training,
+                                                               causality=True,
+                                                               scope="self_attention")
 
                     # Vanilla encoder-decoder attention
                     # dec:[N,T2,d_model]
                     # memory:[N, T1, d_model], memory可以看成encoder最后hidden_state
-                    dec = multihead_attention(queries=dec,
-                                              keys=memory,
-                                              values=memory,
-                                              num_heads=self.hp.num_heads,
-                                              dropout_rate=self.hp.dropout_rate,
-                                              training=training,
-                                              causality=False,
-                                              scope="vanilla_attention")
-                    ### Feed Forward
+                    dec = multihead_attention_and_add_and_norm(queries=dec,
+                                                               keys=memory,
+                                                               values=memory,
+                                                               num_heads=self.hp.num_heads,
+                                                               dropout_rate=self.hp.dropout_rate,
+                                                               training=training,
+                                                               causality=False,
+                                                               scope="vanilla_attention")
+                    ### Feed Forward && add and norm
                     # dec:[N,T2,d_model]
-                    dec = positionwise_feedforward(dec, num_units=[self.hp.d_ff, self.hp.d_model])
+                    dec = positionwise_feedforward_and_add_and_norm(dec, num_units=[self.hp.d_ff, self.hp.d_model])
 
         """
         注意:原始paper中, 所有decoder过完之后,会有一个Linear层,最后经过softmax,此处少了Linear层

@@ -236,12 +236,12 @@ def mask(inputs, queries=None, keys=None, type=None):
 
     return outputs
 
-def multihead_attention(queries, keys, values,
-                        num_heads=8, 
-                        dropout_rate=0,
-                        training=True,
-                        causality=False,
-                        scope="multihead_attention"):
+def multihead_attention_and_add_and_norm(queries, keys, values,
+                                         num_heads=8,
+                                         dropout_rate=0,
+                                         training=True,
+                                         causality=False,
+                                         scope="multihead_attention"):
     '''Applies multihead attention. See 3.2.2
     queries: A 3d tensor with shape of [N, T_q, d_model].
     keys: A 3d tensor with shape of [N, T_k, d_model].
@@ -320,7 +320,7 @@ def multihead_attention(queries, keys, values,
  
     return attentioned_value
 
-def positionwise_feedforward(inputs, num_units, scope="positionwise_feedforward"):
+def positionwise_feedforward_and_add_and_norm(inputs, num_units, scope="positionwise_feedforward"):
     '''position-wise feed forward net. See 3.3
     
     inputs: A 3d tensor with shape of [N, T, C].
@@ -330,10 +330,11 @@ def positionwise_feedforward(inputs, num_units, scope="positionwise_feedforward"
     Returns:
       A 3d tensor with the same shape and dtype as inputs
 
+    注意:这个是每个位置上的词,做自己的feed-forward
     procedure:
-    1. feed-forward
-    2. residual
-    3. layer normalization
+    1. feed-forward (两层全连接,中间加relu激活函数)
+    2. residual (add)
+    3. layer normalization (norm)
     '''
     with tf.variable_scope(scope, reuse=tf.AUTO_REUSE):
         # Inner layer

@@ -68,13 +68,13 @@ class Graph():
                 for i in range(hp.num_blocks):
                     with tf.variable_scope("num_blocks_{}".format(i)):
                         ### Multihead Attention
-                        self.enc = multihead_attention(queries=self.enc, 
-                                                        keys=self.enc, 
-                                                        num_units=hp.hidden_units, 
-                                                        num_heads=hp.num_heads, 
-                                                        dropout_rate=hp.dropout_rate,
-                                                        is_training=is_training,
-                                                        causality=False)
+                        self.enc = multihead_attention_and_add_and_norm(queries=self.enc,
+                                                                        keys=self.enc,
+                                                                        num_units=hp.hidden_units,
+                                                                        num_heads=hp.num_heads,
+                                                                        dropout_rate=hp.dropout_rate,
+                                                                        is_training=is_training,
+                                                                        causality=False)
                         
                         ### Feed Forward
                         self.enc = feedforward(self.enc, num_units=[4*hp.hidden_units, hp.hidden_units])
@@ -116,24 +116,24 @@ class Graph():
                 for i in range(hp.num_blocks):
                     with tf.variable_scope("num_blocks_{}".format(i)):
                         ## Multihead Attention ( self-attention)
-                        self.dec = multihead_attention(queries=self.dec, 
-                                                        keys=self.dec, 
-                                                        num_units=hp.hidden_units, 
-                                                        num_heads=hp.num_heads, 
-                                                        dropout_rate=hp.dropout_rate,
-                                                        is_training=is_training,
-                                                        causality=True, 
-                                                        scope="self_attention")
+                        self.dec = multihead_attention_and_add_and_norm(queries=self.dec,
+                                                                        keys=self.dec,
+                                                                        num_units=hp.hidden_units,
+                                                                        num_heads=hp.num_heads,
+                                                                        dropout_rate=hp.dropout_rate,
+                                                                        is_training=is_training,
+                                                                        causality=True,
+                                                                        scope="self_attention")
                         
                         ## Multihead Attention ( vanilla attention)
-                        self.dec = multihead_attention(queries=self.dec, 
-                                                        keys=self.enc, 
-                                                        num_units=hp.hidden_units, 
-                                                        num_heads=hp.num_heads,
-                                                        dropout_rate=hp.dropout_rate,
-                                                        is_training=is_training, 
-                                                        causality=False,
-                                                        scope="vanilla_attention")
+                        self.dec = multihead_attention_and_add_and_norm(queries=self.dec,
+                                                                        keys=self.enc,
+                                                                        num_units=hp.hidden_units,
+                                                                        num_heads=hp.num_heads,
+                                                                        dropout_rate=hp.dropout_rate,
+                                                                        is_training=is_training,
+                                                                        causality=False,
+                                                                        scope="vanilla_attention")
                         
                         ## Feed Forward
                         self.dec = feedforward(self.dec, num_units=[4*hp.hidden_units, hp.hidden_units])
