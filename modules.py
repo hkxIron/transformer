@@ -330,7 +330,9 @@ def positionwise_feedforward_and_add_and_norm(inputs, num_units, scope="position
     Returns:
       A 3d tensor with the same shape and dtype as inputs
 
-    注意:这个是每个位置上的词,做自己的feed-forward
+    Observe that during this step, vector representations of tokens don’t “interact” with each other.
+    It is equivalent to run the calculations row-wise and stack the resulting rows in a matrix.
+    注意:这个是每个位置上的词,做自己的feed-forward,即各token间并没有发生交互.
     procedure:
     1. feed-forward (两层全连接,中间加relu激活函数)
     2. residual (add)
@@ -338,13 +340,16 @@ def positionwise_feedforward_and_add_and_norm(inputs, num_units, scope="position
     '''
     with tf.variable_scope(scope, reuse=tf.AUTO_REUSE):
         # Inner layer
-        # inputs: [N, T, C].
+        # inputs: [N, T, C]. N=batch_size, T=time_step, C=channel
+        # outputs: [N, T, num_units[0]].
         outputs = tf.layers.dense(inputs, units=num_units[0], activation=tf.nn.relu)
 
         # Outer layer
+        # outputs: [N, T, num_units[1]].
         outputs = tf.layers.dense(outputs, units=num_units[1])
 
         # Residual connection
+        # outputs: [N, T, num_units[1]].
         outputs += inputs
         
         # Normalize
