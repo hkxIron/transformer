@@ -28,7 +28,8 @@ def layer_normalization(inputs, epsilon = 1e-8, scope="layer_normalization"):
         # inputs: [N, T_q, d_model].
         # mean: [N, T_q, 1],只在最后一个维度上进行求平均
         # variance: [N, T_q, 1],只在最后一个维度上进行求方差
-        mean, variance = tf.nn.moments(inputs, axes=[-1], keep_dims=True)
+        mean, variance = tf.nn.moments(inputs, axes=[-1], keep_dims=True) # 计算输入tensor的均值与方差
+        # beta与gamma是需要学习的参数
         # beta:[d_model,]
         beta= tf.get_variable("beta", params_shape, initializer=tf.zeros_initializer())
         # gamma:[d_model,]
