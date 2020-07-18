@@ -60,13 +60,16 @@ def get_token_embeddings(vocab_size, num_units, zero_pad=True):
     weight variable: (V, E)
     '''
     with tf.variable_scope("shared_weight_matrix"):
+        # embeddings:[vocab_size, num_units]
         embeddings = tf.get_variable('weight_mat',
                                    dtype=tf.float32,
                                    shape=(vocab_size, num_units),
                                    initializer=tf.contrib.layers.xavier_initializer())
         if zero_pad:
-            embeddings = tf.concat((tf.zeros(shape=[1, num_units]),
-                                    embeddings[1:, :]), 0)
+            # embeddings:[vocab_size, num_units]
+            embeddings = tf.concat((tf.zeros(shape=[1, num_units]), # 将第0个vocab_size置成全0, 在padding时,index=0对应的正是字符<pad>
+                                    embeddings[1:, :]),
+                                   axis=0)
     return embeddings
 
 def scaled_dot_product_attention(Q, K, V,
@@ -86,8 +89,10 @@ def scaled_dot_product_attention(Q, K, V,
     :return query_key_interaction:[N, T_q, d_v]
     '''
     """
+    注意:key与value的seq长度必须相等
+    
     计算每个q对所有k_i的score
-    如q=[i,love,nlp]
+    如:q=[i,love,nlp]
     
     score_i = q*k(i)/sqrt(d_k)
     score_i = softmax(score_i)
@@ -95,6 +100,7 @@ def scaled_dot_product_attention(Q, K, V,
     """
 
     with tf.variable_scope(scope, reuse=tf.AUTO_REUSE):
+        #Q:[N, T_q, d_k].
         d_k = Q.get_shape().as_list()[-1]
 
         # dot product
@@ -112,7 +118,7 @@ def scaled_dot_product_attention(Q, K, V,
         # K:[N, T_k, d_k]
         # query_key_interaction:[N, T_q, T_k]
         # 对于key mask的话, 将key padding成outputs的维度
-        query_key_interaction = mask(query_key_interaction, Q, K, type="key")
+        query_key_interaction = mask(query_key_interaction, Q, K, type="key") # 将key中元素全为0的mask掉,元素全为0的正是<pad>对应padding所生成的embedding
 
         # causality or future blinding masking
         """
@@ -133,8 +139,8 @@ def scaled_dot_product_attention(Q, K, V,
             query_key_interaction = mask(query_key_interaction, type="future")
 
         # softmax
-        # query_key_interaction_norm:[N, T_q, T_k]
-        query_key_interaction_norm = tf.nn.softmax(query_key_interaction)
+        # query_key_interaction_norm:[N, T_q, T_k], 每个query对所有的key进行attention
+        query_key_interaction_norm = tf.nn.softmax(query_key_interaction, axis=-1)
         # attention:[N, T_k, T_q]
         attention = tf.transpose(query_key_interaction_norm, [0, 2, 1])
         tf.summary.image("attention", tf.expand_dims(attention[:1], -1)) # 取第一个元素,进行展示
@@ -144,7 +150,7 @@ def scaled_dot_product_attention(Q, K, V,
         # K:[N, T_k, d_k]
         # query_key_interaction_norm:[N, T_q, T_k]
         # 对于query mask的话, 将query padding成outputs的维度
-        query_key_interaction_norm = mask(query_key_interaction_norm, Q, K, type="query")
+        query_key_interaction_norm = mask(query_key_interaction_norm, Q, K, type="query") # 将query中元素全为0的mask掉,元素全为0的正是<pad>对应padding所生成的embed
 
         # dropout
         # query_key_interaction_norm:[N, T_q, T_k]
@@ -160,14 +166,14 @@ def scaled_dot_product_attention(Q, K, V,
 
 def mask(inputs, queries=None, keys=None, type=None):
     """Masks paddings on keys or queries to inputs
-    inputs: 3d tensor. (N, T_q, T_k)
+    inputs: 3d tensor. (N, T_q, T_k), 每个query对每个key的交互:(T_q, T_k)
     queries: 3d tensor. (N, T_q, d)
     keys: 3d tensor. (N, T_k, d)
 
     e.g.,
     >> queries = tf.constant([[[1.],
-                        [2.],
-                        [0.]]], tf.float32) # (1, 3, 1)
+                               [2.],
+                               [0.]]], tf.float32) # (1, 3, 1)
     >> keys = tf.constant([[[4.],
                             [0.]]], tf.float32)  # (1, 2, 1)
     >> inputs = tf.constant([[[4., 0.],
@@ -175,41 +181,44 @@ def mask(inputs, queries=None, keys=None, type=None):
                               [0., 0.]]], tf.float32) #(1,3,2)
     >> mask(inputs, queries, keys, "key") # (1, 3, 2)
     array([[[ 4.0000000e+00, -4.2949673e+09],
-        [ 8.0000000e+00, -4.2949673e+09],
-        [ 0.0000000e+00, -4.2949673e+09]]], dtype=float32)
+            [ 8.0000000e+00, -4.2949673e+09],
+            [ 0.0000000e+00, -4.2949673e+09]]], dtype=float32)
 
     >> inputs = tf.constant([[[1., 0.],
-                             [1., 0.],
-                             [1., 0.]]], tf.float32) # (1,3,2)
+                              [1., 0.],
+                              [1., 0.]]], tf.float32) # (1,3,2)
     >> mask(inputs, queries, keys, "query") # (1,3,2)
     array([[[1., 0.],
-        [1., 0.],
-        [0., 0.]]], dtype=float32)
+            [1., 0.],
+            [0., 0.]]], dtype=float32)
     """
     padding_num = -2 ** 32 + 1 # -4294967297
     if type in ("k", "key", "keys"):
         # 对于key的话, padding成input的维度
         # Generate masks
         # keys: [N, T_k, d]
-        masks = tf.sign(tf.reduce_sum(tf.abs(keys), axis=-1))  # (N, T_k)
+        masks = tf.sign(tf.reduce_sum(tf.abs(keys), axis=-1))  # (N, T_k), 为啥需要将key abs后reduce_sum, 现在里面只有[0,1], 且只有元素都为0时才会为0
         masks = tf.expand_dims(masks, 1) # (N, 1, T_k)
         # masks:[N, 1, T_k]
+        #    => [N, T_q, T_k]
         # queries: [N, T_q, d]
         masks = tf.tile(masks, [1, tf.shape(queries)[1], 1])  # (N, T_q, T_k)
 
         # Apply masks to inputs
         # inputs: [N, T_q, T_k]
-        paddings = tf.ones_like(inputs) * padding_num # 注意, padding的不是0,而是一个比较小的数
-        outputs = tf.where(tf.equal(masks, 0), paddings, inputs)  # (N, T_q, T_k)
+        paddings = tf.ones_like(inputs) * padding_num # 注意, padding的不是0,而是一个比较大的负数
+        outputs = tf.where(tf.equal(masks, 0), paddings, inputs)  # (N, T_q, T_k), 搞不懂,keys中的这里哪些T_k为0呢?
+
     elif type in ("q", "query", "queries"):
         # 对于query的话, padding成input的维度
         # Generate masks
+        # queries: (N, T_q, T_k)
         masks = tf.sign(tf.reduce_sum(tf.abs(queries), axis=-1))  # (N, T_q)
         masks = tf.expand_dims(masks, -1)  # (N, T_q, 1)
         masks = tf.tile(masks, [1, 1, tf.shape(keys)[1]])  # (N, T_q, T_k)
 
         # Apply masks to inputs
-        outputs = inputs*masks
+        outputs = inputs * masks # mask为0的地方直接被置成0了
     elif type in ("f", "future", "right"):
         """
         生成inputs的关于时间的掩码下三角矩阵
@@ -230,19 +239,19 @@ def mask(inputs, queries=None, keys=None, type=None):
 
         paddings = tf.ones_like(masks) * padding_num
         # outputs: [N, T_q, T_k]
-        outputs = tf.where(tf.equal(masks, 0), paddings, inputs)
+        outputs = tf.where(tf.equal(masks, 0), paddings, inputs) # 每个T_q只能与前面时间点的T_k进行交互
     else:
         print("Check if you entered type correctly!")
 
 
     return outputs
 
-def multihead_attention_and_add_and_norm(queries, keys, values,
-                                         num_heads=8,
-                                         dropout_rate=0,
-                                         training=True,
-                                         causality=False,
-                                         scope="multihead_attention"):
+def multihead_attention_and_residual_and_norm(queries, keys, values,
+                                              num_heads=8,
+                                              dropout_rate=0,
+                                              training=True,
+                                              causality=False,
+                                              scope="multihead_attention"):
     '''Applies multihead attention. See 3.2.2
     queries: A 3d tensor with shape of [N, T_q, d_model].
     keys: A 3d tensor with shape of [N, T_k, d_model].
@@ -257,7 +266,7 @@ def multihead_attention_and_add_and_norm(queries, keys, values,
       A 3d tensor with shape of (N, T_q, C)
 
     =====================
-    注意:T_q与T_k的值不一定会相同,所以会有padding
+    注意:T_q与T_k的值不一定会相同,所以会有padding, 但是keys与values的序列长度肯定一样,因为一个key对应一个value,即(key,value)
     procedures:
     1. self-attention
     2. add residual
@@ -275,15 +284,15 @@ def multihead_attention_and_add_and_norm(queries, keys, values,
         k=X*Wk
         v=X*Wv
         """
-        # Linear projections, 将query, key, value映射成指定维度的向量
+        # Linear projections, 将query, key, value映射成指定维度的向量, 其意义是将原始向量空间转换到attention的空间
         # queries:[N, T_q, d_model], units=d_model
         # Q:[N, T_q, d_model]
-        Q = tf.layers.dense(inputs=queries, units=d_model, use_bias=False) # (N, T_q, d_model), 里面是matrix_W_Q
+        Q = tf.layers.dense(inputs=queries, units=d_model, use_bias=False) # (N, T_q, d_model), 里面参数是matrix_W_Q
         K = tf.layers.dense(inputs=keys, units=d_model, use_bias=False) # (N, T_k, d_model), matrix_W_k
         V = tf.layers.dense(inputs=values, units=d_model, use_bias=False) # (N, T_k, d_model), matrix_W_v
         
         # Split and concat
-        # 将原始的Q在第2维分割成num_heads=h份,然后在第0维拼接
+        # 将原始的Q在第2维分割成num_heads=h份,然后在第0维拼接, 意义是将attention空间切分成多个等份
         Q_ = tf.concat(tf.split(value=Q, num_or_size_splits=num_heads, axis=2), axis=0) # (h*N, T_q, d_model/h)
         K_ = tf.concat(tf.split(value=K, num_or_size_splits=num_heads, axis=2), axis=0) # (h*N, T_k, d_model/h)
         V_ = tf.concat(tf.split(value=V, num_or_size_splits=num_heads, axis=2), axis=0) # (h*N, T_k, d_model/h)
@@ -321,7 +330,7 @@ def multihead_attention_and_add_and_norm(queries, keys, values,
  
     return attentioned_value
 
-def positionwise_feedforward_and_add_and_norm(inputs, num_units, scope="positionwise_feedforward"):
+def positionwise_feedforward_and_residual_and_norm(inputs, num_units, scope="positionwise_feedforward"):
     '''position-wise feed forward net. See 3.3
     
     inputs: A 3d tensor with shape of [N, T, C].
@@ -333,7 +342,7 @@ def positionwise_feedforward_and_add_and_norm(inputs, num_units, scope="position
 
     Observe that during this step, vector representations of tokens don’t “interact” with each other.
     It is equivalent to run the calculations row-wise and stack the resulting rows in a matrix.
-    注意:这个是每个位置上的词,做自己的feed-forward,即各token间并没有发生交互.
+    注意:这个是每个位置上的词,做自己的feed-forward,即各token间并没有发生交互,即在T这个维度上各自前向传播,并未发生交互.
     procedure:
     1. feed-forward (两层全连接,中间加relu激活函数)
     2. residual (add)
@@ -343,7 +352,7 @@ def positionwise_feedforward_and_add_and_norm(inputs, num_units, scope="position
         # Inner layer
         # inputs: [N, T, C]. N=batch_size, T=time_step, C=channel
         # outputs: [N, T, num_units[0]].
-        outputs = tf.layers.dense(inputs, units=num_units[0], activation=tf.nn.relu)
+        outputs = tf.layers.dense(inputs, units=num_units[0], activation=tf.nn.relu) # 参数w: [C, num_units[0]]
 
         # Outer layer
         # outputs: [N, T, num_units[1]].
@@ -354,13 +363,14 @@ def positionwise_feedforward_and_add_and_norm(inputs, num_units, scope="position
         outputs += inputs
         
         # Normalize
+        # outputs: [N, T, num_units[1]].
         outputs = layer_normalization(outputs)
     
     return outputs
 
 def label_smoothing(inputs, epsilon=0.1):
     """
-    有点像laplace平滑,将给为0的标签一个比较小的概率
+    有点像laplace平滑,将给为0的标签一个比较小的值
     :param inputs:
     :param epsilon:
     :return:
@@ -417,28 +427,32 @@ def positional_encoding(inputs,
         PE(pos,2i)  =sin(pos/power(10000,2i/d_model))
     奇数位置:
         PE(pos,2i+1)=cos(pos/power(10000,2i/d_model))
+    上面亦等价于:
+        PE(pos,x) = sin(pos/power(10000,x/d_model)) , x为偶数
+        PE(pos,x) = cos(pos/power(10000,(x-1)/d_model)) , x为奇数
+        即为x-x%2
     '''
-
+    # inputs: [N, T, E]
     E = inputs.get_shape().as_list()[-1] # static, tuple
     N, T = tf.shape(inputs)[0], tf.shape(inputs)[1] # dynamic
     with tf.variable_scope(scope, reuse=tf.AUTO_REUSE):
         # position indices
-        position_ind = tf.tile(tf.expand_dims(tf.range(T), 0), multiples=[N, 1]) # (N, T)
+        position_ind = tf.tile(tf.expand_dims(tf.range(T), 0), multiples=[N, 1]) # (N, T), 每行是0~(T-1)的序列
 
         # First part of the Poistion Embedding function: sin and cos argument
         # 偶数就不减,奇数减1
-        # [maxlen, E]
+        # [maxlen, E], 每个pos在相同的embedding维度上的值不一样
         position_enc = np.array([
-            [pos / np.power(10000, (i-i%2)/E) for i in range(E)] for pos in range(maxlen)
+            [pos / np.power(10000, (i-i%2)/E) for i in range(E)] for pos in range(maxlen) # maxlen >= T
         ])
 
         # Second part, apply the cosine to even columns and sin to odds.
-        position_enc[:, 0::2] = np.sin(position_enc[:, 0::2])  # dim 2i
-        position_enc[:, 1::2] = np.cos(position_enc[:, 1::2])  # dim 2i+1
-        position_enc = tf.convert_to_tensor(position_enc, tf.float32) # (maxlen, E)
+        position_enc[:, 0::2] = np.sin(position_enc[:, 0::2])  # dim 2i, 偶数位置
+        position_enc[:, 1::2] = np.cos(position_enc[:, 1::2])  # dim 2i+1, 奇数位置
+        position_enc = tf.convert_to_tensor(position_enc, tf.float32) # (maxlen, E), 将numpy array转为tensor
 
         # lookup
-        # position_enc:[maxlen, E]
+        # position_enc:[maxlen, E], 即[vocab_size=maxlen, embedding_dim=E]
         # position_ind:[N, T]
         # outputs:[N, T, E]
         outputs = tf.nn.embedding_lookup(position_enc, position_ind)
@@ -447,7 +461,7 @@ def positional_encoding(inputs,
         if masking:
             # inputs:[N,T,E]
             # outputs:[N,T,E]
-            # inputs中mask=0的地方,还是填0
+            # inputs中mask=0的地方,output还是0, 否则就是output
             outputs = tf.where(tf.equal(inputs, 0), x=inputs, y=outputs)
 
         return tf.to_float(outputs)
@@ -458,6 +472,8 @@ def noam_scheme(init_lr, global_step, warmup_steps=4000.):
     global_step: scalar.
     warmup_steps: scalar. During warmup_steps, learning rate increases
         until it reaches init_lr.
+
+    带有warmup的learning_rate
     '''
     step = tf.cast(global_step + 1, dtype=tf.float32)
     """

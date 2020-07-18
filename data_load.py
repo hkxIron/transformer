@@ -22,7 +22,7 @@ def load_vocab(vocab_fpath):
     two dictionaries.
     '''
     vocab = [line.split()[0] for line in open(vocab_fpath, 'r', encoding="utf-8").read().splitlines()]
-    token2idx = {token: idx for idx, token in enumerate(vocab)}
+    token2idx = {token: idx for idx, token in enumerate(vocab)} # pad是第一个元素,所以index=0
     idx2token = {idx: token for idx, token in enumerate(vocab)}
     return token2idx, idx2token
 
@@ -118,8 +118,8 @@ def input_fn(sents1, sents2, vocab_fpath, batch_size, shuffle=False):
               ([None], [None], (), ())) # ys:
     types = ((tf.int32, tf.int32, tf.string),
              (tf.int32, tf.int32, tf.int32, tf.string))
-    paddings = ((0, 0, ''),
-                (0, 0, 0, ''))
+    paddings = ((0, 0, ''), # xs: x, x_seq_len, sent1
+                (0, 0, 0, '')) # ys: decoder_input, y, y_seq_len, sent2
 
     dataset = tf.data.Dataset.from_generator(
         generator_fn,
